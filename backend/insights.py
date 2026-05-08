@@ -379,24 +379,26 @@ async def fetch_ngobase_orgs(country_code: Optional[str],
     for b in blocks:
         name_m = re.search(r'itemprop="name"[\s\S]*?<a[^>]*>(.*?)</a>', b, re.S)
         link_m = re.search(r'<a\s+href="(/profile/\d+|https?://ngobase\.org/profile/\d+)"', b)
-        locs = [l.strip() for l in re.findall(r'class="listing_locations"[^>]*>([^<]+)<', b)]
+        locs = [loc.strip() for loc in re.findall(r'class="listing_locations"[^>]*>([^<]+)<', b)]
         works = [w.strip() for w in re.findall(
             r'class="ngo_listing_work_area_li"[^>]*>(?:\s*<a[^>]*>)?([^<]+)', b
         )]
         # Dedup work_areas while preserving order
-        seen = set(); works_unique = []
+        seen = set()
+        works_unique = []
         for w in works:
             wl = w.lower()
             if wl in seen or not w:
                 continue
-            seen.add(wl); works_unique.append(w)
+            seen.add(wl)
+            works_unique.append(w)
         name = (name_m.group(1).strip() if name_m else "")
         if not name:
             continue
         profile = link_m.group(1) if link_m else ""
         if profile.startswith("/"):
             profile = _NGOBASE_BASE + profile
-        locs_l = [l.lower() for l in locs]
+        locs_l = [loc.lower() for loc in locs]
         item = {
             "name": name[:120],
             "profile_url": profile,
@@ -404,9 +406,9 @@ async def fetch_ngobase_orgs(country_code: Optional[str],
             "work_areas": works_unique[:4],
         }
         is_match = False
-        if district_l and any(district_l in l for l in locs_l):
+        if district_l and any(district_l in loc for loc in locs_l):
             is_match = True
-        elif state_l and any(state_l in l for l in locs_l):
+        elif state_l and any(state_l in loc for loc in locs_l):
             is_match = True
         (matched if is_match else fallback).append(item)
 
