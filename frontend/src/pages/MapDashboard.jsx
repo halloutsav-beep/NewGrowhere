@@ -510,7 +510,7 @@ export default function MapDashboard() {
           <hr className="my-4 border-[#E3DFD5]" />
           <span className="small-label">Legend</span>
           <div className="space-y-2 mt-3">
-            {Object.entries(ZONE_STYLES).map(([k, s]) => (
+            {Object.entries(ZONE_STYLES).filter(([k]) => k !== 'restricted_protected').map(([k, s]) => (
               <div key={k} className="flex items-center gap-2 text-sm">
                 <span className="w-3.5 h-3.5 rounded-full" style={{ backgroundColor: s.color }} />
                 <span className="font-medium">{s.label}</span>
@@ -612,7 +612,7 @@ export default function MapDashboard() {
 
       {/* Top right zone-summary */}
       <div className="absolute top-5 right-5 z-[500] panel-glass px-3 py-3 hidden md:flex items-center gap-1" data-testid="zone-summary">
-        {Object.entries(ZONE_STYLES).map(([k, s]) => {
+        {Object.entries(ZONE_STYLES).filter(([k]) => k !== 'restricted_protected').map(([k, s]) => {
           const isActive =
             (zoneFilter === 'free' && k === 'high_potential') ||
             (zoneFilter === 'allowed' && (k === 'high_potential' || k === 'moderate_permission_needed')) ||
