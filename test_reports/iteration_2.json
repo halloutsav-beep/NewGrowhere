@@ -1,0 +1,52 @@
+{
+  "summary": "Iteration 2 full regression + sponsorship tests. Backend: 30/31 pytest tests pass (all regression + new sponsorship: tiers, campaigns CRUD, pledge credits/funded flip, idempotency, Stripe session creation, invalid-tier/404). 1 failing backend test: /api/sponsorships/checkout/status/{session_id} returns 500 when Stripe can't retrieve a session (CheckoutError bubbles up). Frontend: found CRITICAL bug — MapDashboard crashed with 'sponsorTarget is not defined' and 'tiers is not defined' (missing useState declarations). Fixed by adding two useState hooks. All other UI flows pass: growhere branding (lowercase) everywhere, navbar Sponsor link, /sponsor page (list + create campaign), TierPickerModal with 4 tiers, pledge-only path, Stripe redirect, /sponsor/success polling, map 'Sponsor this planting' auto-creates micro-campaign and opens TierPickerModal.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "GET /api/sponsorships/checkout/status/{session_id}",
+        "issue": "Returns 500 Internal Server Error when Stripe's get_checkout_status() raises CheckoutError (emergentintegrations wraps Stripe 'No such checkout.session' into an exception). Frontend /sponsor/success page polling receives 500s and may never surface a clean error. Expected per review: should return payment_status 'pending'/'open' for unpaid or still-unknown sessions. Needs try/except around `await stripe.get_checkout_status(session_id)` in server.py:699 — on exception, return current txn payment_status (e.g. 'pending') with 200, OR 410/expired if many retries. Reproduces 100% against freshly-created session IDs via the emergent Stripe proxy.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "MapDashboard",
+        "issue": "Uses `tiers`/`setTiers` (line 63) and `sponsorTarget`/`setSponsorTarget` (lines 143, 220-221) without declaring them via useState. Caused a ReferenceError on every /map page load, rendering blank page and blocking the entire map feature + the new 'Sponsor this planting' flow. FIXED in this iteration by adding `const [tiers, setTiers] = useState([])` and `const [sponsorTarget, setSponsorTarget] = useState(null)` at line 51-52.",
+        "selector": "[data-testid=\"map-dashboard\"]",
+        "priority": "CRITICAL-FIXED"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Wrap `await stripe.get_checkout_status(session_id)` in try/except CheckoutError in /app/backend/server.py (checkout_status endpoint) — on exception, return {payment_status: 'pending', ...} with 200 so the Success page polling can handle it cleanly (and eventually give up after N retries). Optionally mark txn as expired after a threshold of failed polls.",
+    "Review: MapDashboard fix applied by test agent — verify this is the intended state shape and location (tiers array + sponsorTarget = campaign object)."
+  ],
+  "critical_code_review_comments": [
+    "server.py:699 — unhandled CheckoutError exception on status poll causes 500 and breaks UX. Wrap in try/except.",
+    "server.py:631 — _apply_payment is called inline for pledge-only; idempotency confirmed working (second call on same txn is a no-op via atomic update_one applied:{$ne:true}). Good.",
+    "server.py now 756 lines — close to the 700-line soft limit mentioned in code-review guidelines; consider splitting sponsorship router into /app/backend/routes/sponsorship.py in a future iteration.",
+    "MapDashboard.jsx had silently-undeclared state — ESLint rule `no-undef` would catch this (recommend enabling react-app ESLint or similar).",
+    "/api/sponsorships/campaigns/{id}/checkout has no rate limiting — a pledge-only path could be spammed to inflate raised_amount since user is optional.",
+    "Sponsor endpoint uses get_optional_user for pledge, which is intentional (allows anonymous pledges) but means anyone can credit a campaign without auth — consider requiring auth for pledge_only=true."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py (added 13 sponsorship tests, updated root test to expect app='growhere')",
+    "/app/frontend/src/pages/MapDashboard.jsx (added missing useState for tiers and sponsorTarget)"
+  ],
+  "success_rate": {"backend": "96.7% (30/31)", "frontend": "100% (after MapDashboard fix)"},
+  "test_credentials": "demo@verdura.app / demo1234 — works (existing DB user, email retained despite rebrand)",
+  "seed_data_creation": "Created 3 TEST_ campaigns via API (TEST_campaign, TEST_idem, TEST_stripe_no_credit) and 1 TEST_UI campaign via UI. Two pledges ($10 + $25) on TEST_campaign flipped its status from 'active' to 'funded' — idempotency verified.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend regression + sponsorship suite in /app/backend/tests/backend_test.py (31 tests). Only failing test is test_stripe_status_pending_for_unpaid, blocked by the 500 bug in checkout_status. MapDashboard state bug fixed in this iteration. Stripe test mode key is sk_test_emergent and the proxy URL is https://integrations.emergentagent.com/stripe — sessions appear to be short-lived or not retrievable, which is why status polling 500s. After main agent fixes the checkout_status error handling, rerun just that test.",
+  "rca of the issue": "1) MapDashboard blank: missing useState for tiers & sponsorTarget — a merge/rebase miss. Symptom: whole /map page unmounts with ReferenceError, Sponsor-this-planting CTA inaccessible. Fix: declare the two state hooks (applied). 2) checkout_status 500: `emergentintegrations.payments.stripe.checkout.StripeCheckout.get_checkout_status` raises `CheckoutError` on any Stripe API error (including 'No such session'); our endpoint does not catch it, so FastAPI returns 500. Fix (main agent): wrap the call in try/except and downgrade to pending/unknown status with 200 OK."
+}

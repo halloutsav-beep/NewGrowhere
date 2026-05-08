@@ -1,0 +1,34 @@
+{
+  "summary": "Iter 4 full regression after GROWhere rebrand + INR localization. Backend: all 31/31 pytest tests PASS after updating expected values (app='GROWhere', tier amounts 500/1500/3500/7500, payment_transactions.currency='inr'). Verified in Mongo: all payment_transactions now have currency='inr' and correct INR amounts. Frontend smoke: /sponsor renders with GROWhere logo, tier panel shows ₹500/₹1,500/₹3,500/₹7,500 (en-IN format), TierPickerModal shows all 4 tier buttons with correct INR, pledge-only seedling flow works end-to-end (campaign raised went ₹0 → ₹500, backers 0 → 1). Landing page shows GROWhere + tier panel with INR amounts. No regressions in auth / suitability / zones / AI species / plantings / community.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:38-44 SPONSOR_CURRENCY='inr' + tier amounts are the single source of truth. Good.",
+    "server.py now 765 lines — still recommend splitting sponsorship router into /app/backend/routes/sponsorship.py.",
+    "Pledge-only checkout still has no auth+rate-limit guard (anonymous /pledge_only=true requests can inflate raised_amount). Carried over from iter 2/3. Not blocking for demo but should be addressed before prod.",
+    "SponsorSuccess page likely polls /checkout/status/ indefinitely on dead Stripe sessions — consider capping to N attempts. Carried over.",
+    "payment_transactions index: consider unique index on session_id and compound (campaign_id, payment_status, applied) to speed up the funded-update path."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {"backend": "100% (31/31)", "frontend": "100% smoke (brand, tier modal, pledge flow)"},
+  "test_credentials": "demo@verdura.app / demo1234 — login works, note email domain intentionally kept as @verdura.app (DB user).",
+  "seed_data_creation": "pytest creates TEST_ campaigns + pledges + stripe sessions in-run (currency=inr). Also visible in /sponsor: TEST_campaign (Bangalore, ₹2,000 funded), TEST_idem (₹1,00,000), TEST_stripe_no_credit (₹50,000). Safe to leave; prefixed TEST_ for cleanup.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend test file updated to new iter-3 INR values: EXPECTED_TIERS = {seedling:500, sapling:1500, grove:3500, forest:7500}; test_root expects app='GROWhere'; test_pledge_increments_and_funds uses target_amount=2000 (seedling+sapling=funded); test_stripe_status_pending_for_unpaid expects amount=3500 grove + currency='inr'. Full suite runs in ~18s. Frontend tier-modal data-testids: tier-seedling/sapling/grove/forest; pledge flow: sponsor-btn-{campaign_id} → tier-picker-modal → tier-{key} → pledge-only-toggle → checkout-submit. en-IN formatting uses toLocaleString('en-IN') so amounts appear as ₹1,500 ₹50,000 ₹1,00,000 (Indian lakh separator).",
+  "rca of the issue": "No new bugs found in iter 4. Rebrand + currency migration clean."
+}

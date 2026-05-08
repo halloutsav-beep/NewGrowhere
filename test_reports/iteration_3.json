@@ -1,0 +1,31 @@
+{
+  "summary": "Iter 3 retest of the previously-failing Stripe checkout_status endpoint. All 31/31 pytest backend tests PASS. The critical bug from iter 2 is fixed: GET /api/sponsorships/checkout/status/{session_id} now wraps the Stripe poll in try/except and returns HTTP 200 with the transaction's last-known payment_status ('initiated') for freshly-created unpaid sessions, instead of 500. 404 behavior for unknown session IDs preserved. Smoke regression (/api/, auth, tiers, campaigns CRUD, pledge flow, idempotency) all still green.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:699-707 — fix is correct and minimal: on Stripe exception, returns 200 with txn.get('payment_status','pending'). Good.",
+    "Consider: after N consecutive poll failures, mark the txn as 'expired' so the frontend Success page can stop polling (currently it may poll indefinitely on a dead session). Not blocking.",
+    "server.py is now ~764 lines — still recommend splitting the sponsorship router into /app/backend/routes/sponsorship.py in a future iteration.",
+    "/api/sponsorships/campaigns/{id}/checkout still has no rate limiting and pledge_only accepts anonymous requests (raised-amount inflation risk). Carried over from iter 2."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (31/31)", "frontend": "not tested (backend-only retest)"},
+  "test_credentials": "demo@verdura.app / demo1234 — works",
+  "seed_data_creation": "pytest creates TEST_ campaigns + stripe sessions in-run (no new external seed needed)",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All backend sponsorship + regression tests green. Stripe status poll now gracefully degrades to txn.payment_status on Stripe errors. If future iterations touch the sponsorship router, rerun /app/backend/tests/backend_test.py (all 31 tests ~20s). test_stripe_status_pending_for_unpaid relies on test_stripe_checkout_returns_url_and_session populating pytest.stripe_session_id — keep their execution order.",
+  "rca of the issue": "Iter 2 bug: emergentintegrations' StripeCheckout.get_checkout_status raises CheckoutError on 'No such session' (common for freshly-created sessions via proxy), propagating an unhandled 500. Fix applied by main agent (server.py:699-707): try/except around get_checkout_status, on exception return 200 with {payment_status: txn.get('payment_status','pending'), amount, currency, campaign_id, tier}. Verified: fresh session returns payment_status='initiated' (not 'paid'); unknown session still 404."
+}

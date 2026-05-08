@@ -1,0 +1,89 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Manrope:wght@300;400;500;600;700;800&display=swap');
+@import url('https://unpkg.com/leaflet@1.9.4/dist/leaflet.css');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Bone white background, deep forest text */
+    --background: 47 33% 95%;
+    --foreground: 144 14% 14%;
+    --card: 0 0% 100%;
+    --card-foreground: 144 14% 14%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 144 14% 14%;
+    --primary: 137 32% 25%;            /* forest 700 */
+    --primary-foreground: 47 33% 97%;
+    --secondary: 42 24% 92%;
+    --secondary-foreground: 144 14% 14%;
+    --muted: 42 24% 92%;
+    --muted-foreground: 144 6% 38%;
+    --accent: 30 50% 64%;               /* ochre */
+    --accent-foreground: 144 14% 14%;
+    --destructive: 16 51% 51%;          /* terracotta */
+    --destructive-foreground: 0 0% 100%;
+    --border: 42 22% 86%;
+    --input: 42 22% 86%;
+    --ring: 137 32% 25%;
+    --radius: 0.875rem;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  html, body, #root { height: 100%; }
+  body {
+    @apply bg-bone text-forest-900;
+    font-family: 'Manrope', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  h1,h2,h3,h4,.serif { font-family: 'Cormorant Garamond', Georgia, serif; }
+  ::selection { background: #2B5336; color: #F8F6F0; }
+}
+
+@layer components {
+  .container-narrow { @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8; }
+  .panel-glass {
+    background: rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    @apply border border-[#E3DFD5] rounded-2xl shadow-[0_8px_32px_rgba(30,40,34,0.10)];
+  }
+  .btn-primary {
+    @apply inline-flex items-center gap-2 bg-forest-700 text-bone hover:bg-forest-800 rounded-full px-6 py-3 font-semibold transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-forest-700 focus:ring-offset-2 focus:ring-offset-bone;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center gap-2 bg-transparent text-forest-900 border border-[#E3DFD5] hover:bg-bonewarm rounded-full px-6 py-3 font-semibold transition-all duration-200;
+  }
+  .badge-soft {
+    @apply inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider;
+  }
+  .small-label {
+    @apply text-xs font-sans uppercase tracking-[0.2em] font-bold text-forest-500;
+  }
+  .topo-bg {
+    background-image:
+      radial-gradient(1200px 600px at 80% -10%, rgba(193, 102, 69, 0.10), transparent 60%),
+      radial-gradient(900px 500px at -10% 110%, rgba(74, 124, 89, 0.12), transparent 60%);
+  }
+}
+
+/* Leaflet container fixes */
+.leaflet-container {
+  background: #E8E2D2;
+  font-family: 'Manrope', system-ui, sans-serif;
+}
+.leaflet-popup-content-wrapper {
+  border-radius: 14px !important;
+  box-shadow: 0 10px 30px rgba(30,40,34,0.18) !important;
+}
+
+/* Reset CRA legacy */
+.App-header { all: unset; }
+
+@layer base {
+  [data-debug-wrapper="true"] { display: contents !important; }
+}

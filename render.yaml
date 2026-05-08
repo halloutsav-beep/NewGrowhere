@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: growhere-backend
+    runtime: python
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: cd backend && uvicorn server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: MONGO_URL
+        value: mongodb+srv://halloutsav_db_user:kbQBAOiBzcOR5drg@cluster0.ehmczoh.mongodb.net/?appName=Cluster0
+      - key: DB_NAME
+        value: growhere
+      - key: EMERGENT_LLM_KEY
+        value: sk-emergent-aD740Ec1c75285978F
+      - key: CORS_ORIGINS
+        value: https://growhere-frontend.onrender.com
+
+  - type: web
+    name: growhere-frontend
+    runtime: static
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: frontend/build
+    envVars:
+      - key: REACT_APP_BACKEND_URL
+        value: https://growhere-backend.onrender.com

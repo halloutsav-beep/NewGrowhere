@@ -1,0 +1,115 @@
+{
+  "theme": "LIGHT",
+  "archetype": "Archetype 1 (Organic & Earthy)",
+  "design_philosophy": {
+    "identity": "The Anti-AI Designer (E1)",
+    "core_principles": [
+      "Fusion over Imitation: Mix environmental urgency with editorial beauty.",
+      "Emotion First: The UI must feel grounded, tactile, and hopeful.",
+      "Negative Space: Give the map breathing room; avoid cluttered HUDs.",
+      "Contrast: Sharp typography against soft, textured topographic maps."
+    ],
+    "mood": "Empowering, tactile, community-driven, grounded in ecological responsibility."
+  },
+  "typography": {
+    "heading_font": "Cormorant Garamond",
+    "body_font": "Manrope",
+    "hierarchy": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl font-serif tracking-tight leading-none text-forest-900",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl font-serif tracking-tight text-forest-800",
+      "h3": "text-xl sm:text-2xl font-serif text-forest-800",
+      "h4": "text-lg sm:text-xl font-sans font-semibold text-forest-900",
+      "body": "text-base font-sans leading-relaxed text-forest-700",
+      "small_label": "text-xs font-sans uppercase tracking-[0.2em] font-bold text-forest-500"
+    }
+  },
+  "colors": {
+    "background": {
+      "base": "#F8F6F0",
+      "surface": "#FFFFFF",
+      "surface_warm": "#F2EFE9"
+    },
+    "text": {
+      "primary": "#1E2822",
+      "secondary": "#4A564D",
+      "muted": "#8A948C"
+    },
+    "brand": {
+      "primary": "#2B5336",
+      "primary_hover": "#1E3F20",
+      "accent_moss": "#4A7C59",
+      "accent_terracotta": "#C16645",
+      "accent_ochre": "#D4A373"
+    },
+    "map_suitability_zones": {
+      "high_potential": "#4A7C59",
+      "moderate_permission_needed": "#D4A373",
+      "restricted_protected": "#C16645"
+    },
+    "borders": {
+      "default": "#E3DFD5",
+      "focus": "#2B5336"
+    }
+  },
+  "layout_and_spacing": {
+    "spacing_scale": "Use generous spacing. Prefer p-6, p-8, p-12 over smaller paddings.",
+    "container": "max-w-7xl mx-auto px-4 sm:px-6 lg:px-8",
+    "dashboard_grid": "grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-6",
+    "map_dashboard_strategy": "The map should be a full-screen bleed element. Floating panels (suitability analysis, layer toggles) must sit on top of the map with 'Glassmorphism' or solid white cards. Mobile UI should utilize a bottom-sheet drag drawer pattern.",
+    "bento_grid_marketing": "Use MODE A: Tetris Grid. Mix col-span-8 and col-span-4 to create asymmetry on the landing page."
+  },
+  "surfaces": {
+    "floating_panels": "bg-white/90 backdrop-blur-xl border border-[#E3DFD5] shadow-[0_8px_32px_rgba(30,40,34,0.08)] rounded-2xl",
+    "cards": "bg-white border border-[#E3DFD5] rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow duration-300",
+    "map_controls": "bg-white border border-[#E3DFD5] shadow-lg rounded-full flex items-center justify-center p-3"
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-brand-primary text-white hover:bg-brand-primary_hover rounded-full px-6 py-3 font-sans font-semibold transition-colors focus:ring-2 focus:ring-offset-2 focus:ring-brand-primary",
+      "secondary": "bg-transparent text-text-primary border border-[#E3DFD5] hover:bg-background-surface_warm rounded-full px-6 py-3 font-sans font-semibold transition-colors"
+    },
+    "inputs": "bg-white border border-[#E3DFD5] rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-brand-primary focus:border-transparent text-forest-900",
+    "badges": "rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider"
+  },
+  "interactive_motion": {
+    "hover_states": "All buttons/cards must lift (-translate-y-1) and increase shadow slightly.",
+    "page_transitions": "Use smooth opacity fades. Map layers should fade in gracefully.",
+    "accessibility_motion": "Wrap animations with standard CSS transitions or framer-motion respect prefers-reduced-motion."
+  },
+  "images_and_media": {
+    "hero_background": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/4a62282e-bd47-4dcc-a739-eaabd1f602e2/images/9ee59f2c6c68687b5a73195012f6e735486ee478d9b2e5540d12759dbe15105d.png",
+      "description": "Abstract topographic map lines in warm sand and terracotta colors. Use as hero background with bg-black/10 overlay for text contrast."
+    },
+    "ai_species_recommendation": {
+      "url": "https://static.prod-images.emergentagent.com/jobs/4a62282e-bd47-4dcc-a739-eaabd1f602e2/images/738b985aab963d3ff31d9d54749e9096bb43c4a66699c438688ef7a9d54318ba.png",
+      "description": "Botanical illustration style of a young sapling. Use in the AI recommendation engine panel or zero-state."
+    },
+    "community_feed_1": {
+      "url": "https://images.unsplash.com/photo-1776988931450-7377dead1ed0?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHwxfHxjb21tdW5pdHklMjBwbGFudGluZyUyMHRyZWVzfGVufDB8fHx8MTc3NzY1MzEyOXww&ixlib=rb-4.1.0&q=85",
+      "description": "Men planting shrubs. Use in the community layer / feed."
+    },
+    "community_feed_2": {
+      "url": "https://images.unsplash.com/photo-1758599668429-121d54188b9c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2Njl8MHwxfHNlYXJjaHwyfHxjb21tdW5pdHklMjBwbGFudGluZyUyMHRyZWVzfGVufDB8fHx8MTc3NzY1MzEyOXww&ixlib=rb-4.1.0&q=85",
+      "description": "Volunteers cleaning up / planting. Use in the community layer."
+    },
+    "satellite_map_texture": {
+      "url": "https://images.unsplash.com/photo-1624841934400-6abf1c91625b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NDk1ODB8MHwxfHNlYXJjaHwyfHxzYXRlbGxpdGUlMjB2aWV3JTIwZm9yZXN0JTIwbWFwfGVufDB8fHx8MTc3NzY1MzEyOXww&ixlib=rb-4.1.0&q=85",
+      "description": "Aerial view of green grass field. Use as placeholder for map preview cards."
+    }
+  },
+  "accessibility_and_testing": {
+    "contrast": "Ensure text over images/gradients meets APCA standards. Use text shadow where needed. Tint greys slightly with warm orange.",
+    "testing_attributes": "CRITICAL: All interactive and key informational elements MUST include `data-testid` attribute (e.g., `data-testid=\"map-layer-toggle\"`, `data-testid=\"plant-tree-cta\"`). Use kebab-case and role-based naming."
+  },
+  "instructions_to_main_agent": [
+    "Use pure HTML + Tailwind for marketing layouts. Use Shadcn for the dashboard, heavily customized to match the 'Organic & Earthy' theme.",
+    "Integrate Leaflet for the interactive map. The map should cover the full screen with absolute positioned panels over it.",
+    "Ensure all fonts used are imported from Google Fonts (Cormorant Garamond, Manrope).",
+    "DO NOT use Inter, Roboto, or standard SaaS purple/blue gradients.",
+    "Use lucide-react or @phosphor-icons/react for icons.",
+    "Implement file structure in Javascript (.js, .jsx). No .tsx.",
+    "Apply `data-testid` to all actionable items.",
+    "Do NOT use placeholder image URLs (via.placeholder.com). Strictly use the URLs provided in the images_and_media section."
+  ]
+}
