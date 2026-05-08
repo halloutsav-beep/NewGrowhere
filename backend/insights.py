@@ -44,10 +44,10 @@ ORG_TOPICS = [
 
 # ---------- Reverse geocoding (Nominatim) ------------------------------------
 async def reverse_geocode(lat: float, lng: float) -> Dict[str, Optional[str]]:
-    """Return {district, state, country, display_name} via Nominatim.
+    """Return {district, state, country, country_code, display_name} via Nominatim.
 
-    Falls back to {None, None, None, "lat,lng"} on failure — caller should
-    treat missing fields as low-confidence and skip cache writes.
+    Falls back to None fields on failure — caller should treat missing
+    fields as low-confidence and skip cache writes.
     """
     url = "https://nominatim.openstreetmap.org/reverse"
     params = {"format": "jsonv2", "lat": lat, "lon": lng, "zoom": 10, "addressdetails": 1}
@@ -63,15 +63,18 @@ async def reverse_geocode(lat: float, lng: float) -> Dict[str, Optional[str]]:
                     or addr.get("city") or addr.get("town") or addr.get("village"))
         state = addr.get("state") or addr.get("region")
         country = addr.get("country")
+        cc = (addr.get("country_code") or "").upper() or None
         return {
             "district": district,
             "state": state,
             "country": country,
+            "country_code": cc,
             "display_name": data.get("display_name") or f"{lat:.3f},{lng:.3f}",
         }
     except Exception as e:
         logger.info("reverse_geocode failed for %s,%s: %s", lat, lng, e)
         return {"district": None, "state": None, "country": None,
+                "country_code": None,
                 "display_name": f"{lat:.3f},{lng:.3f}"}
 
 
@@ -270,6 +273,148 @@ async def fetch_google_news(query: str, limit: int = 6,
     return out[: limit * 3]
 
 
+# ---------- Google News redirect resolver -----------------------------------
+# Cache resolved URLs in memory (process-local) — Google news URLs are stable
+# enough to cache, and we re-fetch the cluster anyway every TTL.
+_GN_URL_CACHE: Dict[str, str] = {}
+_GN_URL_CACHE_MAX = 2000
+
+
+def _resolve_google_news_url_sync(url: str) -> Optional[str]:
+    """Decode a Google News rss/articles URL into the publisher URL.
+
+    Uses the ``googlenewsdecoder`` package which performs the encrypted
+    handshake against Google's servers. Returns None on failure.
+    """
+    try:
+        from googlenewsdecoder import gnewsdecoder
+        out = gnewsdecoder(url, interval=1)
+        if isinstance(out, dict) and out.get("status") and out.get("decoded_url"):
+            return out["decoded_url"]
+    except Exception as e:
+        logger.info("gnewsdecoder failed for %s: %s", url[:60], e)
+    return None
+
+
+async def resolve_google_news_urls(items: List[Dict[str, Any]],
+                                   max_concurrency: int = 5,
+                                   timeout_per: float = 5.0) -> List[Dict[str, Any]]:
+    """For each news item with a news.google.com URL, resolve to the
+    publisher's article URL in parallel. Updates ``url`` and ``domain``
+    in-place. Items that fail resolution keep their Google URL but get
+    the publisher's homepage URL from ``source_url`` if available."""
+    sem = asyncio.Semaphore(max_concurrency)
+
+    async def _one(it: Dict[str, Any]):
+        url = it.get("url") or ""
+        if "news.google.com" not in url:
+            return
+        if url in _GN_URL_CACHE:
+            real = _GN_URL_CACHE[url]
+        else:
+            async with sem:
+                try:
+                    real = await asyncio.wait_for(
+                        asyncio.to_thread(_resolve_google_news_url_sync, url),
+                        timeout=timeout_per,
+                    )
+                except (asyncio.TimeoutError, Exception):
+                    real = None
+            if real:
+                if len(_GN_URL_CACHE) >= _GN_URL_CACHE_MAX:
+                    _GN_URL_CACHE.clear()
+                _GN_URL_CACHE[url] = real
+        if real:
+            it["url"] = real
+            it["domain"] = _domain(real) or it.get("domain", "")
+            # Prefer publisher domain for source name when generic
+            if not it.get("source_name") or it["source_name"].lower() == "google news":
+                it["source_name"] = _domain_to_source_name(it["domain"])
+
+    await asyncio.gather(*[_one(it) for it in items], return_exceptions=True)
+    return items
+
+
+# ---------- NGOBase.org scraper ---------------------------------------------
+# Country code → page suffix (the slug after /cwa/<CC>/ENC/ is just used
+# for SEO; any non-empty value works). We ping a stable URL.
+_NGOBASE_BASE = "https://ngobase.org"
+
+
+async def fetch_ngobase_orgs(country_code: Optional[str],
+                             district: Optional[str] = None,
+                             state: Optional[str] = None,
+                             limit: int = 8) -> List[Dict[str, Any]]:
+    """Scrape NGOBase.org's country-level Environment & Climate listing.
+
+    Returns a list of {name, profile_url, locations[], work_areas[]}.
+    Filters by district / state name match where possible. Never invents
+    partnerships or descriptions — only fields actually present on the
+    listing card.
+    """
+    if not country_code:
+        return []
+    url = f"{_NGOBASE_BASE}/cwa/{country_code.upper()}/ENC/x"
+    headers = {"User-Agent": USER_AGENT, "Accept": "text/html"}
+    out: List[Dict[str, Any]] = []
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
+            r = await client.get(url, headers=headers)
+            if r.status_code != 200 or not r.text:
+                return out
+            html = r.text
+    except Exception as e:
+        logger.info("ngobase fetch failed for %s: %s", country_code, e)
+        return out
+
+    blocks = re.findall(
+        r'<div[^>]*class="my_border ngo_listing_div"[^>]*>(.*?)</div>\s*</div>\s*</div>',
+        html, re.S,
+    )
+    district_l = (district or "").strip().lower()
+    state_l = (state or "").strip().lower()
+
+    matched: List[Dict[str, Any]] = []
+    fallback: List[Dict[str, Any]] = []
+    for b in blocks:
+        name_m = re.search(r'itemprop="name"[\s\S]*?<a[^>]*>(.*?)</a>', b, re.S)
+        link_m = re.search(r'<a\s+href="(/profile/\d+|https?://ngobase\.org/profile/\d+)"', b)
+        locs = [l.strip() for l in re.findall(r'class="listing_locations"[^>]*>([^<]+)<', b)]
+        works = [w.strip() for w in re.findall(
+            r'class="ngo_listing_work_area_li"[^>]*>(?:\s*<a[^>]*>)?([^<]+)', b
+        )]
+        # Dedup work_areas while preserving order
+        seen = set(); works_unique = []
+        for w in works:
+            wl = w.lower()
+            if wl in seen or not w:
+                continue
+            seen.add(wl); works_unique.append(w)
+        name = (name_m.group(1).strip() if name_m else "")
+        if not name:
+            continue
+        profile = link_m.group(1) if link_m else ""
+        if profile.startswith("/"):
+            profile = _NGOBASE_BASE + profile
+        locs_l = [l.lower() for l in locs]
+        item = {
+            "name": name[:120],
+            "profile_url": profile,
+            "locations": locs[:3],
+            "work_areas": works_unique[:4],
+        }
+        is_match = False
+        if district_l and any(district_l in l for l in locs_l):
+            is_match = True
+        elif state_l and any(state_l in l for l in locs_l):
+            is_match = True
+        (matched if is_match else fallback).append(item)
+
+    # Prefer locality-matching first, then fall back to country-level entries.
+    out = (matched + fallback)[:limit]
+    return out
+
+
 def get_search_provider():
     """Return the active search provider. Tavily if key present, else Wikipedia."""
     tk = os.environ.get("TAVILY_API_KEY")
@@ -439,8 +584,16 @@ async def fetch_regional_insights(db, lat: float, lng: float) -> dict:
 
 
 async def fetch_organizations(db, lat: float, lng: float) -> dict:
+    """Organizations relevant to the area, sourced from NGOBase.org.
+
+    We never invent NGOs or partnerships — fields are only filled when
+    NGOBase actually exposed them on the card. The optional Wikipedia /
+    Tavily provider is used only as a soft fallback for areas where
+    NGOBase has no entries (rare).
+    """
     geo = await reverse_geocode(lat, lng)
     district, state, country = geo["district"], geo["state"], geo["country"]
+    country_code = geo.get("country_code")
     location_label = ", ".join([x for x in [district, state, country] if x]) or geo["display_name"]
     key = _cache_key(district, state, country, "orgs")
 
@@ -448,60 +601,83 @@ async def fetch_organizations(db, lat: float, lng: float) -> dict:
     if cached:
         return cached
 
-    provider = get_search_provider()
-    place = district or state
-    if not place:
-        return {
-            "available": False,
-            "reason": "Could not resolve a district/state for this point.",
-            "location": location_label, "district": district, "state": state, "country": country,
-            "organizations": [], "sources": [], "provider": provider.name,
-        }
-
-    queries = [f"{t} {place}" for t in ORG_TOPICS[:4]]
-    if state and state != place:
-        queries.append(f"NGO forest conservation {state}")
-
-    seen_urls = set()
-    raw: List[Dict[str, Any]] = []
-    results = await asyncio.gather(*[provider.search(q, limit=2) for q in queries],
-                                   return_exceptions=True)
-    for q, res in zip(queries, results):
-        if isinstance(res, Exception):
-            continue
-        for it in res or []:
-            url = it.get("url")
-            if not url or url in seen_urls:
-                continue
-            seen_urls.add(url)
-            it["query"] = q
-            raw.append(it)
-
-    raw = raw[:8]
-    summarised = await _llm_summarise_items("organisation working on environmental restoration",
-                                            location_label, raw)
-    orgs = []
-    for it in summarised:
-        if not it.get("summary"):
-            continue
-        orgs.append({
-            "name": (it.get("title") or "").strip()[:120],
-            "description": it.get("summary", ""),
-            "area_of_work": it.get("query", ""),
+    # ---- Primary: NGOBase ---------------------------------------------------
+    ngo_items = await fetch_ngobase_orgs(country_code, district=district,
+                                         state=state, limit=8)
+    organizations: List[Dict[str, Any]] = []
+    for it in ngo_items:
+        works = it.get("work_areas") or []
+        locs = it.get("locations") or []
+        # Description is intentionally short, derived only from listing fields.
+        if works and locs:
+            description = f"Works on {', '.join(works[:3])} — based in {', '.join(locs[:2])}."
+        elif works:
+            description = f"Works on {', '.join(works[:3])}."
+        elif locs:
+            description = f"Based in {', '.join(locs[:2])}."
+        else:
+            description = "Listed environmental NGO."
+        organizations.append({
+            "name": it["name"],
+            "description": description,
+            "area_of_work": ", ".join(works[:3]) if works else "Environment & Climate",
             "partners": [],
-            "website": it.get("url", ""),
-            "source_name": it.get("source_name", "") or _domain_to_source_name(it.get("domain", "")),
-            "domain": it.get("domain", ""),
+            "website": it.get("profile_url", ""),
+            "source_name": "NGOBase",
+            "domain": "ngobase.org",
         })
-    orgs = orgs[:8]
-    sources = sorted({o["source_name"] or o["domain"] for o in orgs if o.get("source_name") or o.get("domain")})
+
+    # ---- Fallback: search-provider sweep (Wikipedia or Tavily) -------------
+    if not organizations:
+        provider = get_search_provider()
+        place = district or state
+        if place:
+            queries = [f"{t} {place}" for t in ORG_TOPICS[:4]]
+            if state and state != place:
+                queries.append(f"NGO forest conservation {state}")
+            seen_urls = set()
+            raw: List[Dict[str, Any]] = []
+            results = await asyncio.gather(*[provider.search(q, limit=2) for q in queries],
+                                           return_exceptions=True)
+            for q, res in zip(queries, results):
+                if isinstance(res, Exception):
+                    continue
+                for it in res or []:
+                    url = it.get("url")
+                    if not url or url in seen_urls:
+                        continue
+                    seen_urls.add(url)
+                    it["query"] = q
+                    raw.append(it)
+            raw = raw[:8]
+            summarised = await _llm_summarise_items(
+                "organisation working on environmental restoration",
+                location_label, raw)
+            for it in summarised:
+                if not it.get("summary"):
+                    continue
+                organizations.append({
+                    "name": (it.get("title") or "").strip()[:120],
+                    "description": it.get("summary", ""),
+                    "area_of_work": it.get("query", ""),
+                    "partners": [],
+                    "website": it.get("url", ""),
+                    "source_name": it.get("source_name", "")
+                                    or _domain_to_source_name(it.get("domain", "")),
+                    "domain": it.get("domain", ""),
+                })
+
+    organizations = organizations[:8]
+    sources = sorted({o["source_name"] or o["domain"] for o in organizations
+                      if o.get("source_name") or o.get("domain")})
     payload = {
-        "available": bool(orgs),
-        "reason": None if orgs else "No verified organisations found for this area.",
+        "available": bool(organizations),
+        "reason": None if organizations else "No verified organisations found for this area.",
         "location": location_label, "district": district, "state": state, "country": country,
-        "organizations": orgs, "sources": sources, "provider": provider.name,
+        "organizations": organizations, "sources": sources,
+        "provider": "ngobase" if any(o["source_name"] == "NGOBase" for o in organizations) else "fallback",
     }
-    if orgs and (district or state):
+    if organizations and (district or state):
         await _cache_set(db, key, payload)
     return payload
 
@@ -599,6 +775,10 @@ async def fetch_news(db, lat: float, lng: float) -> dict:
 
     items.sort(key=_sort_key)
     items = items[:10]
+
+    # Resolve Google News redirect URLs into the original publisher URLs
+    # before summarisation, so the UI never points at news.google.com.
+    items = await resolve_google_news_urls(items)
 
     # Compress snippets via the same LLM safeguard (no fabrication).
     summarised = await _llm_summarise_items("recent environmental news",

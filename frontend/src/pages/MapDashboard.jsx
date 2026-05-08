@@ -86,55 +86,32 @@ export default function MapDashboard() {
   };
 
   // ---------------------------------------------------------------------
-  // Coordinate-based water heuristic (fallback for when backend fails).
-  // Conservative bboxes — only flags points CLEARLY inside major water
-  // bodies (ocean interiors + big seas/gulfs/lakes). Near-coast and small
-  // rivers still rely on the backend Overpass check.
+  // Coordinate-based water heuristic (LAST-RESORT fallback only).
+  // Tight, conservative bboxes — only flags points clearly inside DEEP
+  // OPEN ocean (well away from any coastline). Coastal land, beaches,
+  // settlements, peninsulas, islands and small/inland seas must NOT be
+  // flagged here — backend Overpass + land classifier is the source of
+  // truth. We combine signals before blocking: backend says non-plantable
+  // AND its reason mentions water.
   // Shape: [latMin, latMax, lngMin, lngMax]
   // ---------------------------------------------------------------------
   const _WATER_BBOXES = [
-    // Ocean interiors (conservative, away from coasts) ------------------
-    // North Atlantic interior
-    [20, 55, -55, -22],
-    // South Atlantic interior (between S. America and Africa)
-    [-50, -5, -30, 5],
-    // North Pacific interior (wraps the antimeridian -> split)
-    [10, 50, 155, 180],
-    [10, 50, -180, -135],
-    // South Pacific interior
-    [-50, -5, 165, 180],
-    [-50, -5, -180, -100],
-    // Indian Ocean interior
-    [-45, -8, 55, 105],
-    // Arctic
-    [78, 90, -180, 180],
-    // Southern Ocean
-    [-90, -65, -180, 180],
-    // Seas, gulfs, major lakes -----------------------------------------
-    [36, 47, 46.5, 55],      // Caspian Sea
-    [41, 46.5, 28, 41.5],    // Black Sea
-    [12, 30, 32, 44],        // Red Sea
-    [24, 30, 48, 57],        // Persian Gulf
-    [8, 22, 82, 94],         // Bay of Bengal (offshore)
-    [3, 22, 108, 120],       // South China Sea
-    [35, 50, 128, 142],      // Sea of Japan
-    [54, 66, 15, 30],        // Baltic Sea
-    [51, 61, -4, 9],         // North Sea
-    [51, 63, -95, -77],      // Hudson Bay
-    [18, 29, -97, -82],      // Gulf of Mexico
-    [10, 22, -86, -62],      // Caribbean interior
-    [46.3, 49, -92, -84.3],  // Lake Superior
-    [41.5, 46.3, -88, -84.5],// Lake Michigan
-    [43, 46.3, -84.5, -79.7],// Lake Huron
-    [41.3, 43, -83.5, -78.7],// Lake Erie
-    [43.1, 44.3, -79.9, -76.2], // Lake Ontario
-    [-3.1, 0.6, 31.5, 34.9], // Lake Victoria
-    [-9, -3, 28.5, 31],      // Lake Tanganyika
-    [-15, -8.5, 33.8, 35.5], // Lake Malawi
-    [45, 54, 31, 43],        // Sea of Azov + part of Black Sea N.
-    [26, 30, 32, 36],        // Gulf of Suez + N. Red Sea
-    [36, 46, -6, 16],        // W. Mediterranean (coarse)
-    [30, 37, 15, 36],        // E. Mediterranean (coarse)
+    // North Atlantic deep interior (well off both coasts)
+    [25, 50, -50, -25],
+    // South Atlantic deep interior (between S. America and Africa)
+    [-45, -10, -25, 5],
+    // North Pacific deep interior (wraps the antimeridian -> split)
+    [15, 45, 160, 180],
+    [15, 45, -180, -140],
+    // South Pacific deep interior
+    [-45, -10, 170, 180],
+    [-45, -10, -180, -110],
+    // Indian Ocean deep interior
+    [-40, -12, 60, 95],
+    // Arctic deep interior
+    [80, 90, -180, 180],
+    // Southern Ocean deep interior
+    [-90, -68, -180, 180],
   ];
   const _isWaterCoord = (lat, lng) => {
     for (const [laMin, laMax, lnMin, lnMax] of _WATER_BBOXES) {
@@ -250,19 +227,15 @@ export default function MapDashboard() {
   const _ckey = (lat, lng) => `${lat.toFixed(4)},${lng.toFixed(4)}`;
 
   // Core picker: runs analysis with cache + in-flight dedupe.
+  // We never pre-block on coord heuristic alone — backend Overpass +
+  // land classifier is the source of truth. Block only when backend
+  // explicitly says non-plantable AND the reason mentions water.
   const _runPick = async (latlng) => {
-    // Frontend water fallback — block BEFORE any state change / API call.
-    if (_isWaterCoord(latlng[0], latlng[1])) {
-      toast.error('Cannot analyze water. Drop the pin on land.');
-      setPicked(null);
-      setAnalyzing(false);
-      return;
-    }
     setAnalyzing(true); setRecommendation(null);
     const key = _ckey(latlng[0], latlng[1]);
     const cached = analysisCacheRef.current.get(key);
     if (cached) {
-      if (_isWaterPoint(latlng[0], latlng[1], cached.restriction_reason) && cached.plantable === false) {
+      if (cached.plantable === false && _isWater(cached.restriction_reason)) {
         toast.error(`Cannot analyze water (${cached.restriction_reason || 'water body'}). Move the pin to land.`);
         setPicked(null);
         setAnalyzing(false);
@@ -279,8 +252,8 @@ export default function MapDashboard() {
       if (myCall === inflightRef.current) {
         analysisCacheRef.current.set(key, data);
         _persistCache(analysisCacheRef, 'growhere:analysisCache');
-        // Hard-block water: skip the panel entirely, drop the pin, toast the user.
-        if (_isWaterPoint(latlng[0], latlng[1], data.restriction_reason) && data.plantable === false) {
+        // Block ONLY when backend itself confirms water + non-plantable.
+        if (data.plantable === false && _isWater(data.restriction_reason)) {
           toast.error(`Cannot analyze water (${data.restriction_reason || 'water body'}). Move the pin to land.`);
           setPicked(null);
         } else {
@@ -292,13 +265,10 @@ export default function MapDashboard() {
     finally { if (myCall === inflightRef.current) setAnalyzing(false); }
   };
 
-  // Debounced public handler — avoids firing on every rapid click / drag.
+  // Debounced public handler. We do NOT pre-block on coord heuristic
+  // here — coastal land, peninsulas, islands etc. would be falsely
+  // rejected. Wait for backend signal instead.
   const onPick = (latlng) => {
-    // Block pin placement on water outright — no debounce wait, no pin shown.
-    if (_isWaterCoord(latlng[0], latlng[1])) {
-      toast.error('That spot is water. Pick a point on land.');
-      return;
-    }
     setPicked(latlng);
     if (pickDebounceRef.current) clearTimeout(pickDebounceRef.current);
     pickDebounceRef.current = setTimeout(() => _runPick(latlng), 350);
