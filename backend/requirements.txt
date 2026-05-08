@@ -122,3 +122,5 @@ watchfiles==1.1.1
 websockets==16.0
 yarl==1.23.0
 zipp==3.23.0
+googlenewsdecoder==0.1.7
+selectolax==0.4.8
