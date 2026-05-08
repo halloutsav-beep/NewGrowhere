@@ -134,7 +134,7 @@ backend:
         comment: |
           COMPREHENSIVE TESTING COMPLETED - ALL TESTS PASSED ✓
           
-          Tested at: https://ui-refresh-update-2.preview.emergentagent.com/api
+          Tested at: https://clean-zones.preview.emergentagent.com/api
           
           Test Results:
           1. Determinism: Called twice with identical params (lat=12.97, lng=77.59, radius_km=3)
@@ -201,7 +201,7 @@ backend:
         comment: |
           COMPREHENSIVE TESTING COMPLETED - ALL TESTS PASSED ✓
           
-          Tested at: https://ui-refresh-update-2.preview.emergentagent.com/api
+          Tested at: https://clean-zones.preview.emergentagent.com/api
           
           Test Results:
           1. Schema Validation: All required fields present
@@ -298,7 +298,7 @@ backend:
         comment: |
           GBIF UPGRADE VERIFICATION COMPLETE - ALL TESTS PASSED ✓
           
-          Tested at: https://ui-refresh-update-2.preview.emergentagent.com/api
+          Tested at: https://clean-zones.preview.emergentagent.com/api
           Test suite: /app/backend_test.py (updated with GBIF-specific tests)
           
           A. SCHEMA VALIDATION ✓

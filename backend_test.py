@@ -8,7 +8,7 @@ import requests
 import json
 
 # Backend URL from environment
-BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://ui-refresh-update-2.preview.emergentagent.com").rstrip("/")
+BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://clean-zones.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 
 print(f"Testing backend at: {API}")

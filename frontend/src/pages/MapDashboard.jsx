@@ -9,6 +9,7 @@ import {
   Info, Loader2, ChevronUp, ChevronDown, ListFilter, MapPin, Shrub, Sprout, AlertTriangle,
   Copy, Bookmark, BookmarkCheck
 } from 'lucide-react';
+import SuitabilityTabs from '../components/SuitabilityTabs';
 
 // Fix Leaflet default icon
 delete L.Icon.Default.prototype._getIconUrl;
@@ -370,7 +371,11 @@ export default function MapDashboard() {
   };
 
   const visibleZones = useMemo(
-    () => zones.filter(z => filterMatch(z) && !_isWaterCoord(z.center_lat, z.center_lng)),
+    () => zones.filter(z =>
+      filterMatch(z)
+      && z.zone !== 'restricted_protected'   // hide restricted circles entirely (logic kept server-side)
+      && !_isWaterCoord(z.center_lat, z.center_lng)
+    ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [zones, zoneFilter]
   );
@@ -686,6 +691,7 @@ export default function MapDashboard() {
 
             {analysis && !analyzing && (
               <div className={`${panelOpen ? '' : 'hidden md:block'}`}>
+                <SuitabilityTabs analysis={analysis} overview={<>
                 {/* Score */}
                 <div className="flex items-center gap-4 mt-2">
                   <div className="relative w-20 h-20">
@@ -825,6 +831,7 @@ export default function MapDashboard() {
                     {analysis.data_sources.map((s, i) => <li key={i}>· {s}</li>)}
                   </ul>
                 </div>
+                </>} />
               </div>
             )}
           </div>

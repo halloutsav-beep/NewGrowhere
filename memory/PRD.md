@@ -1,45 +1,23 @@
-# GROWhere — PRD
+# GROWhere — PRD (incremental)
 
-## Original problem statement
-GROWhere is a satellite-guided reforestation tool. Users drop a pin, the app reads land suitability, and recommends native species for community planting.
+## Latest changes (2026-01)
+- Suitability panel converted to 3 tabs: Overview / Regional / Organizations
+- New backend endpoints:
+  - POST /api/insights/regional
+  - POST /api/insights/organizations
+- Pluggable web-search provider (default: Wikipedia REST; Tavily activated when TAVILY_API_KEY env is set)
+- LLM (Emergent key, gpt-4o-mini) used ONLY to compress fetched snippets into 1 sentence; instruction-bound to never add facts not in the snippet
+- MongoDB cache `insights_cache` keyed by (kind, country, state, district), TTL 7 days (INSIGHTS_CACHE_TTL_DAYS)
+- Restricted-zone circles no longer rendered on map (logic still computed server-side)
+- Lazy fetch on tab open; in-memory per-coord cache to make tab switching free
 
-## Core requirements (current state)
-1. Deterministic climate zone detection (Köppen-style) from lat/lng — no LLM inference.
-2. Species diversity: 15 native species per pin (6 trees / 5 shrubs / 4 ground cover), weighted randomisation per grid cell.
-3. Polygon-based land classification via Overpass/OSM — flags rivers, lakes, roads, buildings.
-4. Marker precision: non-plantable pins refuse species recommendations with an explicit reason.
-5. Full determinism: same lat/lng ⇒ same response, always (grid-snapped caching).
-6. Static fallback when Overpass/GBIF fail.
+## Files touched
+- backend/insights.py (new)
+- backend/server.py (added insights endpoints + import)
+- frontend/src/components/SuitabilityTabs.jsx (new)
+- frontend/src/pages/MapDashboard.jsx (tabs wrapping + restricted-zone filter)
 
-## Architecture
-```
-/app/backend/
-  server.py              # FastAPI routes
-  climate_zones.py       # Köppen classifier (NEW)
-  land_classifier.py     # Overpass polygon checker (NEW)
-  regional_species.py    # Curated DB, now with categories
-  gbif_lookup.py         # GBIF + category inference
-  tests/test_climate_species.py   # pytest suite
-/app/frontend/src/
-  pages/MapDashboard.jsx # Categorised species UI + non-plantable banner
-  pages/Landing.jsx      # WhatsApp CTA (community URL wired)
-```
-
-## Implemented (Feb 2026 iteration)
-- Deterministic Köppen classifier with ~40 regional overrides (Sahara, Thar, Indian monsoon belt, Mediterranean, SE-Asia rainforest, etc.).
-- Overpass-backed polygon land classifier (cache-by-grid, UA header, 2-endpoint failover, shapely point-in-polygon + line-proximity). Footways/paths/tracks exempted from road blocking so park edges remain plantable.
-- Species DB expanded: every bioregion now has trees + shrubs + ground cover entries; new `pick_species_categorised()` returns 6/5/4 buckets deterministically.
-- GBIF results auto-categorised via family + genus heuristics (`_categorise`).
-- LLM prompt overhauled to demand `species_by_category` output; server robustly parses both categorised and flat LLM responses.
-- Non-plantable pins (river / road / building) short-circuit with `plantable=false`, empty species, and a user-facing reason.
-- Frontend: categorised species rendering (Trees / Shrubs / Ground cover sections), non-plantable warning banner, disabled CTA on blocked pins, Köppen-code badge.
-- WhatsApp community URL wired: `https://chat.whatsapp.com/GbNE9LQ7yRQL0X0rRZHUIX`.
-
-## Backlog (P1)
-- Replace WhatsApp direct-chat placeholder link with real client number.
-- Swap heuristic climate boxes for WWF TEOW shapefile if higher precision is needed.
-- Persist `_SPECIES_CACHE` to MongoDB for determinism across process restarts.
-
-## Testing
-- Backend: 13/13 pass in `/app/backend/tests/test_climate_species.py` (iter 5).
-- Frontend: smoke screenshot OK; full categorised flow verified visually pending user acceptance.
+## Backlog / Future
+- Plug Tavily/Brave key for richer non-Wikipedia sources (gov, NGO, news)
+- Fuzzy district aliasing
+- Per-source quality weighting
