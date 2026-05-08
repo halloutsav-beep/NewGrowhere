@@ -88,4 +88,3 @@ if (isDevServer) {
 }
 
 module.exports = webpackConfig;
-module.exports = webpackConfig;
