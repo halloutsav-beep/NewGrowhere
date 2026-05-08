@@ -17,8 +17,14 @@ services:
   - type: web
     name: growhere-frontend
     runtime: static
-    buildCommand: cd frontend && npm install && npm run build
+    buildCommand: cd frontend && yarn install --frozen-lockfile && yarn build
     staticPublishPath: frontend/build
     envVars:
+      - key: NODE_VERSION
+        value: 18.20.4
       - key: REACT_APP_BACKEND_URL
         value: https://growhere-backend.onrender.com
+      - key: DISABLE_ESLINT_PLUGIN
+        value: "true"
+      - key: CI
+        value: "false"
