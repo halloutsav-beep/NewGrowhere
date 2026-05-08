@@ -691,7 +691,7 @@ NEWS_TOPICS = [
 ]
 
 # Recency window — drop items older than this. Override with NEWS_MAX_AGE_DAYS.
-NEWS_MAX_AGE_DAYS = int(os.environ.get("NEWS_MAX_AGE_DAYS", "180"))
+NEWS_MAX_AGE_DAYS = int(os.environ.get("NEWS_MAX_AGE_DAYS", "30"))
 
 
 def _is_recent(published_iso: Optional[str]) -> bool:
@@ -716,11 +716,122 @@ def _trust_rank(domain: str) -> int:
     return 3
 
 
+# ---------- Direct-publisher RSS aggregator (replaces Google News) ----------
+# Adapter pattern: each source has its own feed URL(s) and a "regional"
+# bias hint. Failures in one source never break the whole pipeline.
+RSS_USER_AGENT = (
+    "Mozilla/5.0 (compatible; GROWhereBot/1.0; +https://growhere.app/bot)"
+)
+
+# country-iso → list of feed adapters
+NEWS_FEEDS: Dict[str, List[Dict[str, Any]]] = {
+    "IN": [
+        {"name": "Mongabay India", "url": "https://india.mongabay.com/feed/", "domain": "india.mongabay.com"},
+        {"name": "Down To Earth", "url": "https://www.downtoearth.org.in/feed", "domain": "downtoearth.org.in"},
+        {"name": "The Third Pole", "url": "https://www.thethirdpole.net/feed/", "domain": "thethirdpole.net"},
+        {"name": "The Hindu — Energy & Environment", "url": "https://www.thehindu.com/sci-tech/energy-and-environment/feeder/default.rss", "domain": "thehindu.com"},
+        {"name": "The Indian Express — India", "url": "https://indianexpress.com/section/india/feed/", "domain": "indianexpress.com"},
+        {"name": "The Indian Express — Cities", "url": "https://indianexpress.com/section/cities/feed/", "domain": "indianexpress.com"},
+    ],
+    # Generic / default — Mongabay global & TTP work everywhere; UN feed is
+    # often XML-malformed so we leave it out for now (graceful skip).
+    "*": [
+        {"name": "Mongabay", "url": "https://news.mongabay.com/feed/", "domain": "news.mongabay.com"},
+        {"name": "The Third Pole", "url": "https://www.thethirdpole.net/feed/", "domain": "thethirdpole.net"},
+    ],
+}
+
+# Topic keywords used both for relevance scoring and as a soft topical filter.
+NEWS_TOPIC_KEYWORDS = [
+    "afforestation", "deforestation", "reforestation",
+    "biodiversity", "ecological restoration", "ecology",
+    "forest", "wildlife", "wetland", "mangrove",
+    "tree plantation", "conservation", "nature", "ngt",
+    "climate", "ecosystem", "habitat", "sanctuary",
+    "tiger reserve", "national park", "green cover",
+]
+
+
+async def _fetch_rss_items(adapter: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Fetch a single RSS feed → list of normalised items.
+    Returns [] on any error so one bad feed never breaks the pipeline."""
+    out: List[Dict[str, Any]] = []
+    headers = {"User-Agent": RSS_USER_AGENT, "Accept": "application/rss+xml, application/xml, text/xml"}
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
+            r = await client.get(adapter["url"], headers=headers)
+            if r.status_code != 200 or not r.text:
+                return out
+            text = r.text
+        root = _ET.fromstring(text)
+        channel = root.find("channel") or root  # tolerate both rss & atom-ish
+        items = channel.findall("item") if channel is not None else []
+        for it in items:
+            link = (it.findtext("link") or "").strip()
+            title = (it.findtext("title") or "").strip()
+            if not link or not title:
+                continue
+            desc = it.findtext("description") or ""
+            desc = re.sub(r"<[^>]+>", " ", desc)
+            desc = re.sub(r"\s+", " ", desc).strip()
+            pub_raw = (it.findtext("pubDate")
+                       or it.findtext("{http://purl.org/dc/elements/1.1/}date")
+                       or "")
+            published = None
+            if pub_raw:
+                try:
+                    dt = _parsedate(pub_raw)
+                    if dt:
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        published = dt.astimezone(timezone.utc).isoformat()
+                except Exception:
+                    pass
+            domain = _domain(link) or adapter.get("domain") or ""
+            out.append({
+                "title": title[:200],
+                "snippet": desc[:600],
+                "url": link,
+                "domain": domain,
+                "source_name": adapter["name"],
+                "published": published,
+            })
+    except Exception as e:
+        logger.info("rss fetch failed [%s]: %s", adapter.get("name"), e)
+    return out
+
+
+def _score_relevance(item: Dict[str, Any], district: Optional[str],
+                     state: Optional[str], country: Optional[str]) -> int:
+    """Lightweight regional + topical relevance score.
+
+    +4 district-name hit, +2 state, +1 country, +1 per topic keyword (cap +3),
+    +1 trusted-domain bonus. Items below threshold are dropped.
+    """
+    text = f"{item.get('title','')} {item.get('snippet','')}".lower()
+    if not text.strip():
+        return 0
+    score = 0
+    if district and district.lower() in text:
+        score += 4
+    if state and state.lower() in text:
+        score += 2
+    if country and country.lower() in text:
+        score += 1
+    topic_hits = sum(1 for kw in NEWS_TOPIC_KEYWORDS if kw in text)
+    score += min(topic_hits, 3)
+    if (item.get("domain") or "") in _TRUSTED_DOMAINS:
+        score += 1
+    return score
+
+
 async def fetch_news(db, lat: float, lng: float) -> dict:
-    """Recent regional environmental news. Google News RSS-driven, filtered
-    for recency and trusted journalism. Wikipedia is explicitly excluded."""
+    """Recent regional environmental news, sourced directly from publisher
+    RSS feeds. No Google News redirects. Each source failing in isolation
+    never breaks the tab."""
     geo = await reverse_geocode(lat, lng)
     district, state, country = geo["district"], geo["state"], geo["country"]
+    country_code = (geo.get("country_code") or "").upper()
     location_label = ", ".join([x for x in [district, state, country] if x]) or geo["display_name"]
     key = _cache_key(district, state, country, "news")
 
@@ -728,75 +839,83 @@ async def fetch_news(db, lat: float, lng: float) -> dict:
     if cached:
         return cached
 
-    place = district or state
-    if not place:
+    if not (district or state):
         return {
             "available": False,
             "reason": "Could not resolve a district/state for this point.",
             "location": location_label, "district": district, "state": state, "country": country,
-            "items": [], "sources": [], "provider": "google_news_rss",
+            "items": [], "sources": [], "provider": "rss_aggregator",
         }
 
-    queries: List[str] = [f"{t} {place}" for t in NEWS_TOPICS[:5]]
-    if state and state != place:
-        queries.append(f"environment news {state}")
-        queries.append(f"forest department {state}")
-
-    raw_results = await asyncio.gather(
-        *[fetch_google_news(q, limit=4, country_hint=country) for q in queries],
+    adapters = NEWS_FEEDS.get(country_code) or NEWS_FEEDS["*"]
+    raw_lists = await asyncio.gather(
+        *[_fetch_rss_items(a) for a in adapters],
         return_exceptions=True,
     )
 
-    seen_urls = set()
-    items: List[Dict[str, Any]] = []
-    for q, res in zip(queries, raw_results):
+    cutoff = datetime.now(timezone.utc) - timedelta(days=NEWS_MAX_AGE_DAYS)
+    seen_urls: set = set()
+    seen_titles: set = set()
+    candidates: List[Dict[str, Any]] = []
+    for res in raw_lists:
         if isinstance(res, Exception) or not res:
             continue
         for it in res:
-            url = it.get("url")
+            url = it.get("url") or ""
             if not url or url in seen_urls:
                 continue
             if it.get("domain") in _BLOCKED_DOMAINS:
                 continue
-            if not _is_recent(it.get("published")):
+            # Recency filter (must have a date and be within window).
+            pub = it.get("published")
+            if not pub:
+                continue
+            try:
+                dt = datetime.fromisoformat(pub.replace("Z", "+00:00"))
+            except Exception:
+                continue
+            if dt < cutoff:
+                continue
+            # Topical + regional relevance — drop if irrelevant.
+            score = _score_relevance(it, district, state, country)
+            if score < 2:
+                continue
+            # Title-fuzzy dedupe
+            t_norm = re.sub(r"[^a-z0-9]+", "", it.get("title", "").lower())[:60]
+            if t_norm and t_norm in seen_titles:
                 continue
             seen_urls.add(url)
-            it["query"] = q
-            it["trust"] = _trust_rank(it.get("domain", ""))
-            items.append(it)
+            if t_norm:
+                seen_titles.add(t_norm)
+            it["score"] = score
+            it["_dt"] = dt
+            candidates.append(it)
 
-    # Sort by trust ascending, then by published descending
-    def _sort_key(it):
-        try:
-            ts = datetime.fromisoformat((it.get("published") or "").replace("Z", "+00:00"))
-        except Exception:
-            ts = datetime.fromtimestamp(0, tz=timezone.utc)
-        return (it.get("trust", 5), -ts.timestamp())
+    # Sort: score desc, then recency desc.
+    candidates.sort(key=lambda x: (-(x.get("score", 0)), -x["_dt"].timestamp()))
+    candidates = candidates[:14]
+    for c in candidates:
+        c.pop("_dt", None)
 
-    items.sort(key=_sort_key)
-    items = items[:10]
+    # LLM summariser (no fabrication — see _llm_summarise_items).
+    summarised = await _llm_summarise_items(
+        "recent environmental news", location_label, candidates,
+    )
 
-    # Resolve Google News redirect URLs into the original publisher URLs
-    # before summarisation, so the UI never points at news.google.com.
-    items = await resolve_google_news_urls(items)
-
-    # Compress snippets via the same LLM safeguard (no fabrication).
-    summarised = await _llm_summarise_items("recent environmental news",
-                                            location_label, items)
-
-    final = []
+    final: List[Dict[str, Any]] = []
     for it in summarised:
         if not it.get("summary"):
             continue
         final.append({
-            "title": it.get("title", "")[:200],
+            "title": it.get("title", "")[:220],
             "summary": it.get("summary", ""),
-            "source_name": it.get("source_name", "") or _domain_to_source_name(it.get("domain", "")),
+            "source_name": it.get("source_name", "")
+                            or _domain_to_source_name(it.get("domain", "")),
             "domain": it.get("domain", ""),
             "url": it.get("url", ""),
             "published": it.get("published"),
         })
-    final = final[:8]
+    final = final[:10]
 
     sources = sorted({(it["source_name"] or it["domain"]) for it in final
                       if it.get("source_name") or it.get("domain")})
@@ -804,8 +923,8 @@ async def fetch_news(db, lat: float, lng: float) -> dict:
         "available": bool(final),
         "reason": None if final else "No recent regional environmental news found.",
         "location": location_label, "district": district, "state": state, "country": country,
-        "items": final, "sources": sources, "provider": "google_news_rss",
+        "items": final, "sources": sources, "provider": "rss_aggregator",
     }
-    if final and (district or state):
+    if final:
         await _cache_set(db, key, payload)
     return payload
