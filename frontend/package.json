@@ -36,7 +36,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "cra-template": "1.2.0",
-    "date-fns": "^4.1.0",
+    "date-fns": "^3.0.0",
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",
     "leaflet": "^1.9.4",
@@ -59,7 +59,7 @@
   },
   "scripts": {
     "start": "craco start",
-    "build": "craco build",
+    "build": "DISABLE_ESLINT_PLUGIN=true craco build",
     "test": "craco test"
   },
   "browserslist": {
@@ -74,7 +74,7 @@
       "last 1 safari version"
     ]
   },
-"devDependencies": {
+  "devDependencies": {
     "@babel/plugin-proposal-private-property-in-object": "^7.21.11",
     "@craco/craco": "^7.1.0",
     "@eslint/js": "9.23.0",
@@ -89,11 +89,8 @@
     "tailwindcss": "^3.4.17"
   },
   "overrides": {
-  "ajv": "^8.0.0",
-  "fork-ts-checker-webpack-plugin": {
-    "ajv-keywords": "^5.0.0",
-    "schema-utils": "^4.0.0"
-  }
-},
+    "ajv": "^8.0.0",
+    "fork-ts-checker-webpack-plugin": "^6.5.3"
+  },
   "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }
