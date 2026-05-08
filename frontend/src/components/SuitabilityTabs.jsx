@@ -25,7 +25,7 @@ export default function SuitabilityTabs({ analysis, overview }) {
           Overview
         </TabsTrigger>
         <TabsTrigger value="regional" className="rounded-full text-xs font-bold uppercase tracking-wider py-1.5 data-[state=active]:bg-forest-700 data-[state=active]:text-bone" data-testid="tab-regional">
-          Regional
+          News
         </TabsTrigger>
         <TabsTrigger value="organizations" className="rounded-full text-xs font-bold uppercase tracking-wider py-1.5 data-[state=active]:bg-forest-700 data-[state=active]:text-bone" data-testid="tab-organizations">
           Organizations
@@ -51,6 +51,15 @@ export default function SuitabilityTabs({ analysis, overview }) {
 const _regionalCache = new Map();
 const _orgsCache = new Map();
 const _ckey = (lat, lng) => `${lat.toFixed(4)},${lng.toFixed(4)}`;
+
+const _fmtDate = (iso) => {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  } catch { return ''; }
+};
 
 function useLazyFetch(lat, lng, path, cache) {
   const [state, setState] = useState({ loading: true, data: null, error: null });
@@ -117,7 +126,7 @@ function LoadingState() {
 }
 
 function RegionalInsightsTab({ lat, lng }) {
-  const { loading, data, error } = useLazyFetch(lat, lng, '/insights/regional', _regionalCache);
+  const { loading, data, error } = useLazyFetch(lat, lng, '/insights/news', _regionalCache);
   if (loading) return <LoadingState />;
   if (error) return <EmptyState message={error} />;
   if (!data) return null;
@@ -125,7 +134,7 @@ function RegionalInsightsTab({ lat, lng }) {
     return (
       <>
         <LocationHeader data={data} />
-        <EmptyState message={data.reason || 'No reliable regional insights found.'} />
+        <EmptyState message={data.reason || 'No recent regional environmental news found.'} />
       </>
     );
   }
@@ -142,9 +151,16 @@ function RegionalInsightsTab({ lat, lng }) {
               <ExternalLink className="w-3.5 h-3.5 text-bark flex-shrink-0 mt-1" />
             </div>
             <p className="text-xs text-bark mt-1.5 leading-relaxed">{it.summary}</p>
-            <p className="text-[10px] uppercase tracking-wider text-forest-700 font-bold mt-2">
-              Source: {it.source_name || it.domain}
-            </p>
+            <div className="flex items-center justify-between gap-2 mt-2">
+              <span className="text-[10px] uppercase tracking-wider text-forest-700 font-bold">
+                {it.source_name || it.domain}
+              </span>
+              {it.published && (
+                <span className="text-[10px] text-bark/70 font-mono" data-testid={`regional-date-${i}`}>
+                  {_fmtDate(it.published)}
+                </span>
+              )}
+            </div>
           </a>
         ))}
       </div>

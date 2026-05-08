@@ -183,6 +183,93 @@ class TavilyProvider:
         return out
 
 
+# ---------- Google News RSS (recent articles, no API key) -------------------
+import xml.etree.ElementTree as _ET
+from email.utils import parsedate_to_datetime as _parsedate
+
+# Domains we boost / drop for "trusted environmental journalism" feel
+_TRUSTED_DOMAINS = {
+    "mongabay.com", "india.mongabay.com",
+    "downtoearth.org.in",
+    "fsi.nic.in", "moef.gov.in",
+    "wwfindia.org", "wwf.org",
+    "unep.org",
+    "thehindu.com", "indianexpress.com", "hindustantimes.com",
+    "thethirdpole.net", "ndtv.com", "scroll.in", "thequint.com",
+    "reuters.com", "bbc.com", "bbc.co.uk",
+}
+_BLOCKED_DOMAINS = {"wikipedia.org", "en.wikipedia.org"}
+
+
+def _strip_source_suffix(title: str) -> str:
+    # Google News appends " - Source Name" to titles; strip the last suffix.
+    m = re.match(r"^(.*) - ([^-]+)$", title.strip())
+    return (m.group(1).strip() if m else title.strip())[:200]
+
+
+async def fetch_google_news(query: str, limit: int = 6,
+                            country_hint: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Fetch recent items from Google News RSS for a query.
+
+    Returns raw items with title, snippet, url, domain, source_name, published.
+    """
+    gl = "IN" if (country_hint and country_hint.lower() == "india") else "US"
+    hl = "en-IN" if gl == "IN" else "en-US"
+    ceid = f"{gl}:en"
+    url = "https://news.google.com/rss/search"
+    params = {"q": query, "hl": hl, "gl": gl, "ceid": ceid}
+    headers = {"User-Agent": USER_AGENT}
+    out: List[Dict[str, Any]] = []
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as client:
+            r = await client.get(url, params=params, headers=headers)
+            if r.status_code != 200 or not r.text:
+                return out
+        root = _ET.fromstring(r.text)
+        channel = root.find("channel")
+        if channel is None:
+            return out
+        for item in channel.findall("item")[: limit * 3]:
+            link_el = item.find("link")
+            title_el = item.find("title")
+            desc_el = item.find("description")
+            pub_el = item.find("pubDate")
+            src_el = item.find("source")
+            link = (link_el.text or "").strip() if link_el is not None else ""
+            title = (title_el.text or "").strip() if title_el is not None else ""
+            if not link or not title:
+                continue
+            # Strip HTML from description
+            snippet = re.sub(r"<[^>]+>", " ", desc_el.text or "").strip() if desc_el is not None else ""
+            snippet = re.sub(r"\s+", " ", snippet)
+            published = None
+            if pub_el is not None and pub_el.text:
+                try:
+                    dt = _parsedate(pub_el.text)
+                    if dt:
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        published = dt.astimezone(timezone.utc).isoformat()
+                except Exception:
+                    pass
+            source_name = (src_el.text.strip() if src_el is not None and src_el.text else "")
+            source_url = (src_el.get("url") if src_el is not None else "") or ""
+            domain = _domain(source_url) or _domain(link)
+            if domain in _BLOCKED_DOMAINS:
+                continue
+            out.append({
+                "title": _strip_source_suffix(title),
+                "snippet": snippet,
+                "url": link,
+                "domain": domain,
+                "source_name": source_name or _domain_to_source_name(domain),
+                "published": published,
+            })
+    except Exception as e:
+        logger.info("google news rss failed for %r: %s", query, e)
+    return out[: limit * 3]
+
+
 def get_search_provider():
     """Return the active search provider. Tavily if key present, else Wikipedia."""
     tk = os.environ.get("TAVILY_API_KEY")
@@ -415,5 +502,130 @@ async def fetch_organizations(db, lat: float, lng: float) -> dict:
         "organizations": orgs, "sources": sources, "provider": provider.name,
     }
     if orgs and (district or state):
+        await _cache_set(db, key, payload)
+    return payload
+
+
+
+# ---------- News (Google News RSS — recent articles) ------------------------
+NEWS_TOPICS = [
+    "afforestation", "deforestation", "reforestation",
+    "biodiversity", "ecological restoration",
+    "forest conservation", "tree plantation",
+]
+
+# Recency window — drop items older than this. Override with NEWS_MAX_AGE_DAYS.
+NEWS_MAX_AGE_DAYS = int(os.environ.get("NEWS_MAX_AGE_DAYS", "180"))
+
+
+def _is_recent(published_iso: Optional[str]) -> bool:
+    if not published_iso:
+        return False
+    try:
+        dt = datetime.fromisoformat(published_iso.replace("Z", "+00:00"))
+    except Exception:
+        return False
+    return (datetime.now(timezone.utc) - dt) <= timedelta(days=NEWS_MAX_AGE_DAYS)
+
+
+def _trust_rank(domain: str) -> int:
+    if not domain:
+        return 5
+    if domain in _TRUSTED_DOMAINS:
+        return 0
+    # subdomain match (e.g. india.mongabay.com)
+    for d in _TRUSTED_DOMAINS:
+        if domain.endswith("." + d) or domain == d:
+            return 1
+    return 3
+
+
+async def fetch_news(db, lat: float, lng: float) -> dict:
+    """Recent regional environmental news. Google News RSS-driven, filtered
+    for recency and trusted journalism. Wikipedia is explicitly excluded."""
+    geo = await reverse_geocode(lat, lng)
+    district, state, country = geo["district"], geo["state"], geo["country"]
+    location_label = ", ".join([x for x in [district, state, country] if x]) or geo["display_name"]
+    key = _cache_key(district, state, country, "news")
+
+    cached = await _cache_get(db, key)
+    if cached:
+        return cached
+
+    place = district or state
+    if not place:
+        return {
+            "available": False,
+            "reason": "Could not resolve a district/state for this point.",
+            "location": location_label, "district": district, "state": state, "country": country,
+            "items": [], "sources": [], "provider": "google_news_rss",
+        }
+
+    queries: List[str] = [f"{t} {place}" for t in NEWS_TOPICS[:5]]
+    if state and state != place:
+        queries.append(f"environment news {state}")
+        queries.append(f"forest department {state}")
+
+    raw_results = await asyncio.gather(
+        *[fetch_google_news(q, limit=4, country_hint=country) for q in queries],
+        return_exceptions=True,
+    )
+
+    seen_urls = set()
+    items: List[Dict[str, Any]] = []
+    for q, res in zip(queries, raw_results):
+        if isinstance(res, Exception) or not res:
+            continue
+        for it in res:
+            url = it.get("url")
+            if not url or url in seen_urls:
+                continue
+            if it.get("domain") in _BLOCKED_DOMAINS:
+                continue
+            if not _is_recent(it.get("published")):
+                continue
+            seen_urls.add(url)
+            it["query"] = q
+            it["trust"] = _trust_rank(it.get("domain", ""))
+            items.append(it)
+
+    # Sort by trust ascending, then by published descending
+    def _sort_key(it):
+        try:
+            ts = datetime.fromisoformat((it.get("published") or "").replace("Z", "+00:00"))
+        except Exception:
+            ts = datetime.fromtimestamp(0, tz=timezone.utc)
+        return (it.get("trust", 5), -ts.timestamp())
+
+    items.sort(key=_sort_key)
+    items = items[:10]
+
+    # Compress snippets via the same LLM safeguard (no fabrication).
+    summarised = await _llm_summarise_items("recent environmental news",
+                                            location_label, items)
+
+    final = []
+    for it in summarised:
+        if not it.get("summary"):
+            continue
+        final.append({
+            "title": it.get("title", "")[:200],
+            "summary": it.get("summary", ""),
+            "source_name": it.get("source_name", "") or _domain_to_source_name(it.get("domain", "")),
+            "domain": it.get("domain", ""),
+            "url": it.get("url", ""),
+            "published": it.get("published"),
+        })
+    final = final[:8]
+
+    sources = sorted({(it["source_name"] or it["domain"]) for it in final
+                      if it.get("source_name") or it.get("domain")})
+    payload = {
+        "available": bool(final),
+        "reason": None if final else "No recent regional environmental news found.",
+        "location": location_label, "district": district, "state": state, "country": country,
+        "items": final, "sources": sources, "provider": "google_news_rss",
+    }
+    if final and (district or state):
         await _cache_set(db, key, payload)
     return payload

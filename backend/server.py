@@ -30,7 +30,7 @@ from regional_species import (
 from gbif_lookup import fetch_native_species_near, partition_by_category
 from climate_zones import classify_koppen, climate_summary, climate_tags
 from land_classifier import classify_point as classify_land_point
-from insights import fetch_regional_insights, fetch_organizations
+from insights import fetch_regional_insights, fetch_organizations, fetch_news
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -691,6 +691,11 @@ _insights_router = APIRouter(prefix="/api")
 @_insights_router.post("/insights/regional")
 async def insights_regional(req: InsightsRequest):
     return await fetch_regional_insights(db, req.lat, req.lng)
+
+
+@_insights_router.post("/insights/news")
+async def insights_news(req: InsightsRequest):
+    return await fetch_news(db, req.lat, req.lng)
 
 
 @_insights_router.post("/insights/organizations")
